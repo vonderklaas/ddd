@@ -1,36 +1,112 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Global Poll
+
+A full-stack application for real-time global polling with daily single-question polls on relevant topics. Users can vote YES or NO and see live results segmented by their choices.
+
+## Features
+
+- Daily single-question polls
+- Real-time results showing YES/NO percentages
+- IP-based voting (one vote per IP address)
+- Vote changing allowed before poll expiration
+- 24-hour poll duration
+- Historical poll archive
+- Admin panel for managing polls
+
+## Tech Stack
+
+- **Frontend**: Next.js, React, TailwindCSS
+- **Backend**: Next.js API routes
+- **Database**: PostgreSQL (Neon)
+- **ORM**: Prisma
 
 ## Getting Started
 
-First, run the development server:
+### Prerequisites
+
+- Node.js (>=18.0.0)
+- npm or yarn
+- PostgreSQL database (or Neon database URL)
+
+### Installation
+
+1. Clone the repository
+
+```bash
+git clone [your-repo-url]
+cd global-poll-next
+```
+
+2. Install dependencies
+
+```bash
+npm install
+# or
+yarn install
+```
+
+3. Set up environment variables
+
+Create a `.env` file in the root directory with the following variables:
+
+```
+DATABASE_URL="your-postgresql-connection-string"
+```
+
+4. Initialize the database
+
+```bash
+npx prisma db push
+```
+
+5. Run the development server
 
 ```bash
 npm run dev
 # or
 yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+6. Initialize the application
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Open your browser and navigate to:
+```
+http://localhost:3000/api/init
+```
+This will create a default admin user with credentials:
+- Username: `admin`
+- Password: `admin123`
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Usage
 
-## Learn More
+- Visit `http://localhost:3000` to view and participate in the current poll
+- Visit `http://localhost:3000/history` to view past polls
+- Visit `http://localhost:3000/admin` to access the admin panel
 
-To learn more about Next.js, take a look at the following resources:
+## Deployment
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+This application can be easily deployed to platforms like Vercel:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+npm run build
+npm run start
+```
 
-## Deploy on Vercel
+## Maintaining the Application
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### Poll Expiration
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Polls automatically expire after 24 hours. The application includes two mechanisms to handle this:
+
+1. A cron endpoint at `/api/cron` that can be called by services like Vercel Cron
+2. Expiration checks when viewing polls
+
+### Default Admin Credentials
+
+- Username: `admin`
+- Password: `admin123`
+
+It's highly recommended to change these credentials after initial setup.
+
+## License
+
+[MIT](LICENSE)
