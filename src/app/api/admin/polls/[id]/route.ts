@@ -1,15 +1,13 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
-
-type RouteParams = { params: { id: string } };
 
 // GET /api/admin/polls/[id] - Get a specific poll
 export async function GET(
-  request: NextRequest,
-  context: RouteParams
+  _request: Request,
+  { params }: { params: { id: string } }
 ) {
   try {
-    const { id } = context.params;
+    const { id } = params;
     
     const poll = await prisma.poll.findUnique({
       where: { id },
@@ -38,11 +36,11 @@ export async function GET(
 
 // PATCH /api/admin/polls/[id] - Update a poll
 export async function PATCH(
-  request: NextRequest,
-  context: RouteParams
+  request: Request,
+  { params }: { params: { id: string } }
 ) {
   try {
-    const { id } = context.params;
+    const { id } = params;
     const { question, isActive } = await request.json();
     
     // Check if poll exists
@@ -80,11 +78,11 @@ export async function PATCH(
 
 // DELETE /api/admin/polls/[id] - Delete a poll
 export async function DELETE(
-  request: NextRequest,
-  context: RouteParams
+  _request: Request,
+  { params }: { params: { id: string } }
 ) {
   try {
-    const { id } = context.params;
+    const { id } = params;
     
     // Check if poll exists
     const existingPoll = await prisma.poll.findUnique({
