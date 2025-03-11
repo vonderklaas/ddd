@@ -1,14 +1,11 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 
-// GET /api/admin/polls/[id] - Get a specific poll
-export async function GET(
-  _request: Request,
-  { params }: { params: { id: string } }
-) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function GET(_: Request, { params }: any) {
+  const id = params.id;
+  
   try {
-    const { id } = params;
-    
     const poll = await prisma.poll.findUnique({
       where: { id },
       include: {
@@ -30,18 +27,20 @@ export async function GET(
     return NextResponse.json(poll);
   } catch (error) {
     console.error('Error fetching poll:', error);
-    return NextResponse.json({ message: 'Failed to fetch poll' }, { status: 500 });
+    return NextResponse.json(
+      { message: 'Failed to fetch poll' }, 
+      { status: 500 }
+    );
   }
 }
 
-// PATCH /api/admin/polls/[id] - Update a poll
-export async function PATCH(
-  request: Request,
-  { params }: { params: { id: string } }
-) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function PATCH(request: Request, { params }: any) {
+  const id = params.id;
+  
   try {
-    const { id } = params;
-    const { question, isActive } = await request.json();
+    const body = await request.json();
+    const { question, isActive } = body;
     
     // Check if poll exists
     const existingPoll = await prisma.poll.findUnique({
@@ -72,18 +71,18 @@ export async function PATCH(
     return NextResponse.json(updatedPoll);
   } catch (error) {
     console.error('Error updating poll:', error);
-    return NextResponse.json({ message: 'Failed to update poll' }, { status: 500 });
+    return NextResponse.json(
+      { message: 'Failed to update poll' }, 
+      { status: 500 }
+    );
   }
 }
 
-// DELETE /api/admin/polls/[id] - Delete a poll
-export async function DELETE(
-  _request: Request,
-  { params }: { params: { id: string } }
-) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function DELETE(_: Request, { params }: any) {
+  const id = params.id;
+  
   try {
-    const { id } = params;
-    
     // Check if poll exists
     const existingPoll = await prisma.poll.findUnique({
       where: { id },
@@ -105,6 +104,9 @@ export async function DELETE(
     return NextResponse.json({ message: 'Poll deleted successfully' });
   } catch (error) {
     console.error('Error deleting poll:', error);
-    return NextResponse.json({ message: 'Failed to delete poll' }, { status: 500 });
+    return NextResponse.json(
+      { message: 'Failed to delete poll' }, 
+      { status: 500 }
+    );
   }
 } 
