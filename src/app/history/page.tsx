@@ -24,7 +24,7 @@ interface Poll {
 const historyCache = {
   data: null as Poll[] | null,
   timestamp: 0,
-  cacheDuration: 3600000, // 1 hour in milliseconds (was 10 seconds)
+  cacheDuration: 60000, // 1 minute in milliseconds (reduced from 1 hour)
   isValid: function() {
     return this.data && (Date.now() - this.timestamp < this.cacheDuration);
   }
@@ -34,32 +34,16 @@ export default function History() {
   const [polls, setPolls] = useState<Poll[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    // Check for cached history in localStorage first
-    const checkLocalStorageCache = () => {
-      try {
-        const cachedHistory = localStorage.getItem('pollHistoryCache');
-        if (cachedHistory) {
-          const { data, timestamp } = JSON.parse(cachedHistory);
-          // Check if cache is still valid (within 1 hour)
-          if (data && Date.now() - timestamp < 3600000) {
-            setPolls(data);
-            setLoading(false);
-            // Also update in-memory cache
-            historyCache.data = data;
-            historyCache.timestamp = timestamp;
-            return true;
-          }
-        }
-        return false;
-      } catch (err) {
-        console.error('Error reading from localStorage:', err);
-        return false;
-      }
-    };
+  const fetchHistoricalPolls = async (bypassCache = false) => {
+    if (bypassCache) {
+      setRefreshing(true);
+      setLoading(true);
+    }
     
-    const fetchHistoricalPolls = async () => {
+    // If explicitly bypassing cache, skip these checks
+    if (!bypassCache) {
       // First check in-memory cache
       if (historyCache.isValid()) {
         setPolls(historyCache.data || []);
@@ -68,41 +52,75 @@ export default function History() {
       }
       
       // Then check localStorage cache
-      if (checkLocalStorageCache()) {
-        return;
+      try {
+        const cachedHistory = localStorage.getItem('pollHistoryCache');
+        if (cachedHistory && !bypassCache) {
+          const { data, timestamp } = JSON.parse(cachedHistory);
+          // Check if cache is still valid (within 1 minute)
+          if (data && Date.now() - timestamp < 60000) {
+            setPolls(data);
+            setLoading(false);
+            // Also update in-memory cache
+            historyCache.data = data;
+            historyCache.timestamp = timestamp;
+            return;
+          }
+        }
+      } catch (err) {
+        console.error('Error reading from localStorage:', err);
+      }
+    }
+    
+    // If no valid cache exists or bypassing cache, fetch from API
+    try {
+      const response = await fetch('/api/polls/history');
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch historical polls');
       }
       
-      // If no valid cache exists, fetch from API
+      const data = await response.json();
+      setPolls(data);
+      
+      // Update in-memory cache
+      historyCache.data = data;
+      historyCache.timestamp = Date.now();
+      
+      // Update localStorage cache
       try {
-        const response = await fetch('/api/polls/history');
-        
-        if (!response.ok) {
-          throw new Error('Failed to fetch historical polls');
-        }
-        
-        const data = await response.json();
-        setPolls(data);
-        
-        // Update in-memory cache
-        historyCache.data = data;
-        historyCache.timestamp = Date.now();
-        
-        // Update localStorage cache
-        try {
-          localStorage.setItem('pollHistoryCache', JSON.stringify({
-            data,
-            timestamp: Date.now()
-          }));
-        } catch (err) {
-          console.error('Error saving to localStorage:', err);
-        }
-      } catch {
-        setError('Failed to load historical polls. Please try again later.');
-      } finally {
-        setLoading(false);
+        localStorage.setItem('pollHistoryCache', JSON.stringify({
+          data,
+          timestamp: Date.now()
+        }));
+      } catch (err) {
+        console.error('Error saving to localStorage:', err);
       }
-    };
+    } catch {
+      setError('Failed to load historical polls. Please try again later.');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
 
+  // Clear cache and refresh data
+  const refreshData = () => {
+    // Clear in-memory cache
+    historyCache.data = null;
+    historyCache.timestamp = 0;
+    
+    // Clear localStorage cache
+    try {
+      localStorage.removeItem('pollHistoryCache');
+    } catch (err) {
+      console.error('Error clearing localStorage:', err);
+    }
+    
+    // Fetch fresh data
+    fetchHistoricalPolls(true);
+  };
+
+  useEffect(() => {
     fetchHistoricalPolls();
   }, []);
 

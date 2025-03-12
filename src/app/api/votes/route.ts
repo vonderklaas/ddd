@@ -15,11 +15,6 @@ interface VoteWhereInput {
   deviceFingerprint?: string;
 }
 
-interface VoteUpdateInput {
-  answer: boolean;
-  deviceFingerprint?: string;
-}
-
 interface VoteCreateInput {
   pollId: string;
   ipAddress: string;
@@ -102,33 +97,17 @@ export async function POST(request: NextRequest) {
     const boolAnswer = answer === true || answer === 'true';
 
     if (existingVote) {
-      // Update existing vote
-      await prisma.vote.update({
-        where: { id: existingVote.id },
-        data: { 
-          answer: boolAnswer,
-          deviceFingerprint: deviceIdentifier, // Store the device identifier
-        } as VoteUpdateInput,
-      });
-
+      // No longer allow vote updates - reject if already voted
       return NextResponse.json({
-        message: 'Your vote has been updated',
+        message: 'You have already voted on this poll',
         voteId: existingVote.id,
-      });
+      }, { status: 400 });
     } else if (existingDeviceVote) {
-      // Update vote if we found a match by device fingerprint
-      await prisma.vote.update({
-        where: { id: existingDeviceVote.id },
-        data: { 
-          answer: boolAnswer,
-          ipAddress, // Update with the new IP
-        } as VoteUpdateInput,
-      });
-
+      // No longer allow vote updates - reject if already voted on this device
       return NextResponse.json({
-        message: 'Your vote has been updated',
+        message: 'You have already voted on this poll from this device',
         voteId: existingDeviceVote.id,
-      });
+      }, { status: 400 });
     } else {
       // Create new vote
       const newVote = await prisma.vote.create({

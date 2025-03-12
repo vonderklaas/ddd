@@ -92,14 +92,17 @@ export async function DELETE(_: Request, { params }: any) {
       return NextResponse.json({ message: 'Poll not found' }, { status: 404 });
     }
 
-    // Delete the poll and its votes
-    await prisma.vote.deleteMany({
-      where: { pollId: id },
-    });
-    
-    await prisma.poll.delete({
-      where: { id },
-    });
+    // Use a transaction to ensure all deletions succeed or fail together
+    await prisma.$transaction([
+      // Delete all related comments first
+      prisma.$executeRaw`DELETE FROM "Comment" WHERE "pollId" = ${id}`,
+      
+      // Delete all related votes
+      prisma.$executeRaw`DELETE FROM "Vote" WHERE "pollId" = ${id}`,
+      
+      // Now it's safe to delete the poll
+      prisma.$executeRaw`DELETE FROM "Poll" WHERE "id" = ${id}`
+    ]);
 
     return NextResponse.json({ message: 'Poll deleted successfully' });
   } catch (error) {

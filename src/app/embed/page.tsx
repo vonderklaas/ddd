@@ -68,8 +68,11 @@ export default function EmbedPoll() {
   const submitVote = async (answer: boolean) => {
     if (!poll) return;
     
-    // If user has already voted with this answer, don't submit again
-    if (userVote === answer) return;
+    // If user has already voted, don't allow them to vote again
+    if (userVote !== null) {
+      setError('You have already voted on this poll.');
+      return;
+    }
     
     setVoteSubmitting(true);
     setError(null);
@@ -153,6 +156,10 @@ export default function EmbedPoll() {
           
           <h2 className="text-lg font-bold mb-4">{poll.question}</h2>
           
+          <p className="text-center text-xs text-gray-500 mb-3">
+            Note: You can only vote once on this poll. Your vote cannot be changed after submission.
+          </p>
+          
           {message && !error && (
             <div className="mb-3 p-2 bg-green-50 border border-green-200 text-green-700 text-sm rounded">
               {message}
@@ -168,7 +175,7 @@ export default function EmbedPoll() {
           <div className="flex flex-col sm:flex-row justify-center gap-2 mb-4">
             <button
               onClick={() => submitVote(true)}
-              disabled={voteSubmitting || userVote === true}
+              disabled={voteSubmitting || userVote !== null}
               className={`py-2 px-4 rounded-full text-sm font-bold text-white ${
                 userVote === true
                   ? 'bg-green-600 cursor-not-allowed'
@@ -180,7 +187,7 @@ export default function EmbedPoll() {
             
             <button
               onClick={() => submitVote(false)}
-              disabled={voteSubmitting || userVote === false}
+              disabled={voteSubmitting || userVote !== null}
               className={`py-2 px-4 rounded-full text-sm font-bold text-white ${
                 userVote === false
                   ? 'bg-red-600 cursor-not-allowed'

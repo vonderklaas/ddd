@@ -49,6 +49,34 @@ export async function POST(request: NextRequest) {
     // Create device identifier
     const deviceIdentifier = fingerprint || request.headers.get('user-agent') || '';
     
+    // Check if user has already commented on this poll
+    const existingComment = await prisma.comment.findFirst({
+      where: {
+        pollId,
+        ipAddress,
+      },
+    });
+
+    // Check if this device has already commented
+    const existingDeviceComment = !existingComment && deviceIdentifier ? await prisma.comment.findFirst({
+      where: {
+        pollId,
+        deviceFingerprint: deviceIdentifier,
+      },
+    }) : null;
+
+    if (existingComment) {
+      return NextResponse.json({ 
+        message: 'You have already submitted a comment for this poll' 
+      }, { status: 400 });
+    }
+
+    if (existingDeviceComment) {
+      return NextResponse.json({ 
+        message: 'You have already submitted a comment for this poll from this device' 
+      }, { status: 400 });
+    }
+    
     // Create the comment
     const comment = await prisma.comment.create({
       data: {
