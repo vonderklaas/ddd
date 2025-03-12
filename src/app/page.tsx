@@ -7,6 +7,8 @@ import Link from 'next/link';
 interface Poll {
   id: string;
   question: string;
+  category: string;
+  customCategory?: string;
   createdAt: string;
   expiresAt: string;
   statistics: {
@@ -18,11 +20,19 @@ interface Poll {
   };
 }
 
+interface Comment {
+  id: string;
+  pollId: string;
+  content: string;
+  answer: boolean;
+  createdAt: string;
+}
+
 // Cache storage with timestamps
 const pollCache = {
   data: null as Poll | null,
   timestamp: 0,
-  cacheDuration: 10000, // 10 seconds in milliseconds
+  cacheDuration: 30000, // 30 seconds in milliseconds (increased from 10 seconds)
   isValid: function() {
     return this.data && (Date.now() - this.timestamp < this.cacheDuration);
   }
@@ -53,17 +63,54 @@ const saveUserVoteToStorage = (pollId: string, vote: boolean): void => {
   }
 };
 
+// Helper to store poll data in localStorage 
+const savePollToLocalStorage = (pollData: Poll): void => {
+  if (typeof window === 'undefined') return;
+  
+  try {
+    localStorage.setItem('currentPollCache', JSON.stringify({
+      data: pollData,
+      timestamp: Date.now()
+    }));
+  } catch (err) {
+    console.error('Error saving poll to localStorage:', err);
+  }
+};
+
+// Helper to get poll data from localStorage
+const getPollFromLocalStorage = (): { data: Poll | null, timestamp: number } => {
+  if (typeof window === 'undefined') return { data: null, timestamp: 0 };
+  
+  try {
+    const cachedData = localStorage.getItem('currentPollCache');
+    if (cachedData) {
+      return JSON.parse(cachedData);
+    }
+  } catch (err) {
+    console.error('Error reading poll from localStorage:', err);
+  }
+  
+  return { data: null, timestamp: 0 };
+};
+
 export default function Home() {
   const [poll, setPoll] = useState<Poll | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [userVote, setUserVote] = useState<boolean | null>(null);
   const [voteSubmitting, setVoteSubmitting] = useState(false);
+  const [showEmbedCode, setShowEmbedCode] = useState(false);
+  const [embedCodeCopied, setEmbedCodeCopied] = useState(false);
+  const [comment, setComment] = useState('');
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [loadingComments, setLoadingComments] = useState(false);
+  const [commentError, setCommentError] = useState<string | null>(null);
+  const [animatingResults, setAnimatingResults] = useState(false);
 
   // Fetch current poll with caching
   useEffect(() => {
     const fetchPoll = async () => {
-      // Check if we have valid cached data
+      // Check if we have valid in-memory cached data
       if (pollCache.isValid()) {
         setPoll(pollCache.data);
         
@@ -77,6 +124,26 @@ export default function Home() {
         return;
       }
       
+      // Check localStorage for cached poll data
+      const { data: cachedPoll, timestamp } = getPollFromLocalStorage();
+      
+      // If localStorage cache is valid (less than 30 seconds old)
+      if (cachedPoll && (Date.now() - timestamp < 30000)) {
+        // Update in-memory cache
+        pollCache.data = cachedPoll;
+        pollCache.timestamp = timestamp;
+        
+        setPoll(cachedPoll);
+        
+        // Check localStorage for this poll's vote
+        const savedVote = getUserVoteFromStorage(cachedPoll.id);
+        setUserVote(savedVote);
+        
+        setLoading(false);
+        return;
+      }
+      
+      // If no valid cache, fetch from API
       try {
         const response = await fetch('/api/polls');
         
@@ -92,9 +159,12 @@ export default function Home() {
         
         const data = await response.json();
         
-        // Update the cache
+        // Update the in-memory cache
         pollCache.data = data;
         pollCache.timestamp = Date.now();
+        
+        // Update localStorage cache
+        savePollToLocalStorage(data);
         
         // Check localStorage for this poll's vote
         const savedVote = getUserVoteFromStorage(data.id);
@@ -110,10 +180,35 @@ export default function Home() {
 
     fetchPoll();
     
-    // Refresh poll data every 30 seconds
-    const intervalId = setInterval(fetchPoll, 30000);
+    // Refresh poll data every 60 seconds (increased from 30 seconds)
+    const intervalId = setInterval(fetchPoll, 60000);
     return () => clearInterval(intervalId);
   }, []);
+
+  // Fetch comments for the current poll
+  useEffect(() => {
+    if (poll) {
+      fetchComments(poll.id);
+    }
+  }, [poll]);
+
+  // Fetch comments
+  const fetchComments = async (pollId: string) => {
+    setLoadingComments(true);
+    try {
+      const response = await fetch(`/api/comments?pollId=${pollId}`);
+      if (response.ok) {
+        const data = await response.json();
+        setComments(data);
+      } else {
+        console.error('Failed to fetch comments');
+      }
+    } catch (err) {
+      console.error('Error fetching comments:', err);
+    } finally {
+      setLoadingComments(false);
+    }
+  };
 
   // Submit vote
   const submitVote = async (answer: boolean) => {
@@ -151,21 +246,127 @@ export default function Home() {
       // Save vote to localStorage
       saveUserVoteToStorage(poll.id, answer);
       
+      // Trigger animation
+      setAnimatingResults(true);
+      
       // Fetch the actual updated poll data immediately
       const pollResponse = await fetch('/api/polls');
       if (pollResponse.ok) {
         const pollData = await pollResponse.json();
         setPoll(pollData);
         
-        // Update the cache
+        // Update the in-memory cache
         pollCache.data = pollData;
         pollCache.timestamp = Date.now();
+        
+        // Update localStorage cache
+        savePollToLocalStorage(pollData);
+        
+        // End animation after a short delay
+        setTimeout(() => {
+          setAnimatingResults(false);
+        }, 1000);
       } else {
         throw new Error('Failed to fetch updated poll data');
       }
     } catch (err) {
       console.error('Error submitting vote:', err);
       setError('Failed to submit your vote. Please try again.');
+      setAnimatingResults(false);
+    } finally {
+      setVoteSubmitting(false);
+    }
+  };
+
+  // Submit comment
+  const submitComment = async (answer: boolean) => {
+    if (!poll || !comment.trim()) return;
+    
+    if (comment.length > 280) {
+      setCommentError('Comment must be 280 characters or less');
+      return;
+    }
+    
+    setVoteSubmitting(true);
+    setCommentError(null);
+    
+    try {
+      // First submit the vote
+      const voteResponse = await fetch('/api/votes', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          pollId: poll.id,
+          answer,
+          fingerprint: navigator.userAgent,
+        }),
+      });
+      
+      if (!voteResponse.ok) {
+        throw new Error('Failed to submit vote');
+      }
+      
+      await voteResponse.json();
+      
+      // Then submit the comment
+      const commentResponse = await fetch('/api/comments', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          pollId: poll.id,
+          content: comment.trim(),
+          answer,
+          fingerprint: navigator.userAgent,
+        }),
+      });
+      
+      if (!commentResponse.ok) {
+        throw new Error('Failed to submit comment');
+      }
+      
+      // Update user's vote state
+      setUserVote(answer);
+      
+      // Save vote to localStorage
+      saveUserVoteToStorage(poll.id, answer);
+      
+      // Clear comment
+      setComment('');
+      
+      // Refresh comments
+      fetchComments(poll.id);
+      
+      // Trigger animation
+      setAnimatingResults(true);
+      
+      // Fetch the actual updated poll data immediately
+      const pollResponse = await fetch('/api/polls');
+      if (pollResponse.ok) {
+        const pollData = await pollResponse.json();
+        setPoll(pollData);
+        
+        // Update the in-memory cache
+        pollCache.data = pollData;
+        pollCache.timestamp = Date.now();
+        
+        // Update localStorage cache
+        savePollToLocalStorage(pollData);
+        
+        // End animation after a short delay
+        setTimeout(() => {
+          setAnimatingResults(false);
+        }, 1000);
+      } else {
+        throw new Error('Failed to fetch updated poll data');
+      }
+    } catch (err) {
+      console.error('Error submitting vote and comment:', err);
+      setError('Failed to submit your vote and comment. Please try again.');
+      setAnimatingResults(false);
     } finally {
       setVoteSubmitting(false);
     }
@@ -176,6 +377,26 @@ export default function Home() {
     const now = new Date();
     const expiry = new Date(expiresAt);
     return formatDistance(expiry, now, { addSuffix: true });
+  };
+
+  // Generate embed code
+  const getEmbedCode = () => {
+    const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+    return `<iframe src="${baseUrl}/embed" width="100%" height="300" frameborder="0" scrolling="no" style="border: 1px solid #eee; border-radius: 8px;"></iframe>`;
+  };
+
+  // Copy embed code to clipboard
+  const copyEmbedCode = () => {
+    if (typeof navigator !== 'undefined') {
+      navigator.clipboard.writeText(getEmbedCode())
+        .then(() => {
+          setEmbedCodeCopied(true);
+          setTimeout(() => setEmbedCodeCopied(false), 2000);
+        })
+        .catch(err => {
+          console.error('Failed to copy embed code:', err);
+        });
+    }
   };
 
   if (loading) {
@@ -221,11 +442,37 @@ export default function Home() {
         {poll && (
           <div className="bg-white shadow-xl rounded-lg overflow-hidden w-full">
             <div className="p-6">
+              <div className="flex justify-center mb-2">
+                <span className="inline-block px-3 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                  {poll.category === 'custom' 
+                    ? poll.customCategory 
+                    : (poll.category || 'general').charAt(0).toUpperCase() + (poll.category || 'general').slice(1)}
+                </span>
+              </div>
               <h2 className="text-2xl font-bold mb-6 text-center">{poll.question}</h2>
+              
+              {!userVote && (
+                <div className="mb-4">
+                  <textarea
+                    placeholder="Add an optional comment with your vote (max 280 characters)"
+                    value={comment}
+                    onChange={(e) => setComment(e.target.value)}
+                    maxLength={280}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    rows={2}
+                  />
+                  {commentError && (
+                    <p className="mt-1 text-xs text-red-500">{commentError}</p>
+                  )}
+                  <p className="mt-1 text-xs text-gray-500 text-right">
+                    {comment.length}/280
+                  </p>
+                </div>
+              )}
               
               <div className="flex flex-col sm:flex-row justify-center gap-4 mb-8">
                 <button
-                  onClick={() => submitVote(true)}
+                  onClick={() => comment.trim() ? submitComment(true) : submitVote(true)}
                   disabled={voteSubmitting || userVote === true}
                   className={`py-3 px-8 rounded-full font-bold text-white ${
                     userVote === true
@@ -237,7 +484,7 @@ export default function Home() {
                 </button>
                 
                 <button
-                  onClick={() => submitVote(false)}
+                  onClick={() => comment.trim() ? submitComment(false) : submitVote(false)}
                   disabled={voteSubmitting || userVote === false}
                   className={`py-3 px-8 rounded-full font-bold text-white ${
                     userVote === false
@@ -273,11 +520,13 @@ export default function Home() {
               <div className="mb-4">
                 <h3 className="text-sm text-gray-500 mb-2 text-center">Current Results</h3>
                 
-                <div className="h-8 bg-gray-200 rounded-full overflow-hidden mb-2">
+                <div className="h-8 bg-gray-200 rounded-full overflow-hidden mb-2 relative">
                   {/* Yes percentage bar - shown only if there are yes votes */}
                   {poll.statistics.yesPercentage > 0 && (
                     <div 
-                      className="h-full bg-green-500 flex items-center pl-3 text-xs font-bold text-white float-left"
+                      className={`h-full bg-green-500 flex items-center pl-3 text-xs font-bold text-white float-left ${
+                        animatingResults ? 'transition-all duration-1000 ease-out' : ''
+                      }`}
                       style={{ width: `${poll.statistics.yesPercentage}%` }}
                     >
                       {poll.statistics.yesPercentage > 5 ? `${poll.statistics.yesPercentage}%` : ''}
@@ -287,23 +536,90 @@ export default function Home() {
                   {/* No percentage bar - shown only if there are No votes */}
                   {poll.statistics.noPercentage > 0 && (
                     <div 
-                      className="h-full bg-red-500 flex items-center justify-end pr-3 text-xs font-bold text-white float-right"
+                      className={`h-full bg-red-500 flex items-center justify-end pr-3 text-xs font-bold text-white float-right ${
+                        animatingResults ? 'transition-all duration-1000 ease-out' : ''
+                      }`}
                       style={{ width: `${poll.statistics.noPercentage}%` }}
                     >
                       {poll.statistics.noPercentage > 5 ? `${poll.statistics.noPercentage}%` : ''}
                     </div>
                   )}
+                  
+                  {/* Pulsing animation when results are updating */}
+                  {animatingResults && (
+                    <div className="absolute inset-0 bg-white bg-opacity-20 animate-pulse"></div>
+                  )}
                 </div>
                 
                 <div className="flex justify-between text-sm text-gray-600">
-                  <div>Yes: {poll.statistics.yesVotes} votes ({poll.statistics.yesPercentage}%)</div>
-                  <div>No: {poll.statistics.noVotes} votes ({poll.statistics.noPercentage}%)</div>
+                  <div className={animatingResults ? 'transition-all duration-500' : ''}>
+                    Yes: {poll.statistics.yesVotes} votes ({poll.statistics.yesPercentage}%)
+                  </div>
+                  <div className={animatingResults ? 'transition-all duration-500' : ''}>
+                    No: {poll.statistics.noVotes} votes ({poll.statistics.noPercentage}%)
+                  </div>
                 </div>
+              </div>
+              
+              {/* Comments section */}
+              <div className="mt-8 border-t pt-4">
+                <h3 className="text-lg font-semibold mb-4">Comments</h3>
+                
+                {loadingComments ? (
+                  <p className="text-center text-sm text-gray-500">Loading comments...</p>
+                ) : comments.length > 0 ? (
+                  <div className="space-y-4">
+                    {comments.map((comment) => (
+                      <div key={comment.id} className="p-3 bg-gray-50 rounded-lg">
+                        <div className="flex items-start">
+                          <span className={`inline-block px-2 py-1 text-xs font-semibold rounded-full mr-2 ${
+                            comment.answer ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                          }`}>
+                            {comment.answer ? 'YES' : 'NO'}
+                          </span>
+                          <p className="text-sm">{comment.content}</p>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">
+                          {new Date(comment.createdAt).toLocaleString()}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-center text-sm text-gray-500">No comments yet. Be the first to comment!</p>
+                )}
               </div>
               
               <div className="mt-6 text-center text-sm text-gray-500">
                 <p>Total votes: {poll.statistics.totalVotes}</p>
                 <p>Poll expires {getTimeRemaining(poll.expiresAt)}</p>
+              </div>
+              
+              <div className="mt-6 border-t pt-4">
+                <button
+                  onClick={() => setShowEmbedCode(!showEmbedCode)}
+                  className="text-blue-500 hover:text-blue-700 text-sm flex items-center mx-auto"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+                  </svg>
+                  {showEmbedCode ? 'Hide Embed Code' : 'Embed This Poll'}
+                </button>
+                
+                {showEmbedCode && (
+                  <div className="mt-3 p-3 bg-gray-50 rounded-md">
+                    <p className="text-xs text-gray-600 mb-2">Copy and paste this code to embed the poll on your website:</p>
+                    <div className="relative">
+                      <pre className="bg-gray-100 p-2 rounded text-xs overflow-x-auto">{getEmbedCode()}</pre>
+                      <button
+                        onClick={copyEmbedCode}
+                        className="absolute top-2 right-2 bg-blue-500 hover:bg-blue-600 text-white text-xs py-1 px-2 rounded"
+                      >
+                        {embedCodeCopied ? 'Copied!' : 'Copy'}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>

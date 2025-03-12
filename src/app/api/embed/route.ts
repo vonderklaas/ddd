@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 
-// GET /api/polls - Get the current active poll
+// GET /api/embed - Get the current active poll for embedding
 export async function GET() {
   try {
     // Find the active poll
@@ -37,13 +37,12 @@ export async function GET() {
     const yesPercentage = totalVotes > 0 ? Math.round((yesVotes / totalVotes) * 100) : 0;
     const noPercentage = totalVotes > 0 ? Math.round((noVotes / totalVotes) * 100) : 0;
 
+    // Return minimal data needed for embedding
     return NextResponse.json({
       id: activePoll.id,
       question: activePoll.question,
       category: activePoll.category || 'general',
       customCategory: activePoll.customCategory || null,
-      createdAt: activePoll.createdAt,
-      expiresAt: activePoll.expiresAt,
       statistics: {
         totalVotes,
         yesVotes,
@@ -53,7 +52,7 @@ export async function GET() {
       },
     });
   } catch (error) {
-    console.error('Error fetching active poll:', error);
-    return NextResponse.json({ message: 'Failed to fetch active poll' }, { status: 500 });
+    console.error('Error fetching active poll for embed:', error);
+    return NextResponse.json({ message: 'Failed to fetch poll' }, { status: 500 });
   }
 } 

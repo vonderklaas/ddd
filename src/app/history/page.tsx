@@ -7,6 +7,8 @@ import { format } from 'date-fns';
 interface Poll {
   id: string;
   question: string;
+  category: string;
+  customCategory?: string;
   createdAt: string;
   expiresAt: string;
   statistics: {
@@ -22,7 +24,7 @@ interface Poll {
 const historyCache = {
   data: null as Poll[] | null,
   timestamp: 0,
-  cacheDuration: 10000, // 10 seconds in milliseconds
+  cacheDuration: 3600000, // 1 hour in milliseconds (was 10 seconds)
   isValid: function() {
     return this.data && (Date.now() - this.timestamp < this.cacheDuration);
   }
@@ -34,14 +36,43 @@ export default function History() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // Check for cached history in localStorage first
+    const checkLocalStorageCache = () => {
+      try {
+        const cachedHistory = localStorage.getItem('pollHistoryCache');
+        if (cachedHistory) {
+          const { data, timestamp } = JSON.parse(cachedHistory);
+          // Check if cache is still valid (within 1 hour)
+          if (data && Date.now() - timestamp < 3600000) {
+            setPolls(data);
+            setLoading(false);
+            // Also update in-memory cache
+            historyCache.data = data;
+            historyCache.timestamp = timestamp;
+            return true;
+          }
+        }
+        return false;
+      } catch (err) {
+        console.error('Error reading from localStorage:', err);
+        return false;
+      }
+    };
+    
     const fetchHistoricalPolls = async () => {
-      // Check if we have valid cached data
+      // First check in-memory cache
       if (historyCache.isValid()) {
         setPolls(historyCache.data || []);
         setLoading(false);
         return;
       }
       
+      // Then check localStorage cache
+      if (checkLocalStorageCache()) {
+        return;
+      }
+      
+      // If no valid cache exists, fetch from API
       try {
         const response = await fetch('/api/polls/history');
         
@@ -52,9 +83,19 @@ export default function History() {
         const data = await response.json();
         setPolls(data);
         
-        // Update cache
+        // Update in-memory cache
         historyCache.data = data;
         historyCache.timestamp = Date.now();
+        
+        // Update localStorage cache
+        try {
+          localStorage.setItem('pollHistoryCache', JSON.stringify({
+            data,
+            timestamp: Date.now()
+          }));
+        } catch (err) {
+          console.error('Error saving to localStorage:', err);
+        }
       } catch {
         setError('Failed to load historical polls. Please try again later.');
       } finally {
@@ -96,6 +137,13 @@ export default function History() {
                 className="bg-white shadow rounded-lg overflow-hidden"
               >
                 <div className="p-6">
+                  <div className="flex items-center mb-2">
+                    <span className="inline-block px-3 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800 mr-2">
+                      {poll.category === 'custom' 
+                        ? poll.customCategory 
+                        : (poll.category || 'general').charAt(0).toUpperCase() + (poll.category || 'general').slice(1)}
+                    </span>
+                  </div>
                   <h2 className="text-xl font-bold mb-4">{poll.question}</h2>
                   
                   <div className="mb-4">

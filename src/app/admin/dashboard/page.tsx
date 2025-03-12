@@ -8,6 +8,8 @@ import { format } from 'date-fns';
 interface Poll {
   id: string;
   question: string;
+  category: string;
+  customCategory?: string;
   createdAt: string;
   expiresAt: string;
   isActive: boolean;
@@ -21,6 +23,8 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [newQuestion, setNewQuestion] = useState('');
+  const [category, setCategory] = useState('general');
+  const [customCategory, setCustomCategory] = useState('');
   const [createLoading, setCreateLoading] = useState(false);
   const router = useRouter();
 
@@ -66,12 +70,18 @@ export default function AdminDashboard() {
     setError(null);
     
     try {
+      const pollData = {
+        question: newQuestion.trim(),
+        category: category,
+        customCategory: category === 'custom' ? customCategory.trim() : undefined
+      };
+      
       const response = await fetch('/api/admin/polls', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ question: newQuestion.trim() }),
+        body: JSON.stringify(pollData),
       });
       
       if (!response.ok) {
@@ -79,6 +89,8 @@ export default function AdminDashboard() {
       }
       
       setNewQuestion('');
+      setCategory('general');
+      setCustomCategory('');
       fetchPolls();
     } catch {
       setError('Failed to create poll. Please try again.');
@@ -185,6 +197,43 @@ export default function AdminDashboard() {
                 />
               </div>
               
+              <div className="mb-4">
+                <label htmlFor="category" className="block text-gray-700 font-medium mb-2">
+                  Category
+                </label>
+                <select
+                  id="category"
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  disabled={createLoading}
+                >
+                  <option value="general">General</option>
+                  <option value="politics">Politics</option>
+                  <option value="technology">Technology</option>
+                  <option value="culture">Culture</option>
+                  <option value="climate">Climate</option>
+                  <option value="custom">Custom</option>
+                </select>
+              </div>
+              
+              {category === 'custom' && (
+                <div className="mb-4">
+                  <label htmlFor="customCategory" className="block text-gray-700 font-medium mb-2">
+                    Custom Category
+                  </label>
+                  <input
+                    type="text"
+                    id="customCategory"
+                    value={customCategory}
+                    onChange={(e) => setCustomCategory(e.target.value)}
+                    placeholder="Enter custom category..."
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    disabled={createLoading}
+                  />
+                </div>
+              )}
+              
               <button
                 type="submit"
                 disabled={createLoading}
@@ -215,6 +264,7 @@ export default function AdminDashboard() {
                   <thead>
                     <tr className="bg-gray-50 border-b">
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Question</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Expires</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Votes</th>
@@ -227,6 +277,11 @@ export default function AdminDashboard() {
                       <tr key={poll.id} className="hover:bg-gray-50">
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                           {poll.question}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {poll.category === 'custom' 
+                            ? poll.customCategory 
+                            : (poll.category || 'general').charAt(0).toUpperCase() + (poll.category || 'general').slice(1)}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                           {formatDate(poll.createdAt)}

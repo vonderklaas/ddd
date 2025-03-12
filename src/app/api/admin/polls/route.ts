@@ -24,11 +24,18 @@ export async function GET() {
 // POST /api/admin/polls - Create a new poll
 export async function POST(request: NextRequest) {
   try {
-    const { question } = await request.json();
+    const { question, category, customCategory } = await request.json();
     
     if (!question) {
       return NextResponse.json({ message: 'Question is required' }, { status: 400 });
     }
+
+    // Validate category
+    const validCategories = ['general', 'politics', 'technology', 'culture', 'climate', 'custom'];
+    const finalCategory = category && validCategories.includes(category) ? category : 'general';
+    
+    // Validate customCategory if category is custom
+    const finalCustomCategory = finalCategory === 'custom' && customCategory ? customCategory : null;
 
     // Deactivate all current active polls
     await prisma.poll.updateMany({
@@ -42,6 +49,8 @@ export async function POST(request: NextRequest) {
     const newPoll = await prisma.poll.create({
       data: {
         question,
+        category: finalCategory,
+        customCategory: finalCustomCategory,
         expiresAt,
         isActive: true,
       },
