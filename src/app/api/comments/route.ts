@@ -15,7 +15,6 @@ export async function GET(request: NextRequest) {
     // Get the requester's IP and fingerprint
     const forwardedFor = request.headers.get('x-forwarded-for');
     const ipAddress = forwardedFor ? forwardedFor.split(',')[0].trim() : '127.0.0.1';
-    const userAgent = request.headers.get('user-agent') || '';
     
     const comments = await prisma.comment.findMany({
       where: {
@@ -29,14 +28,12 @@ export async function GET(request: NextRequest) {
     
     // Mark comments from the current user
     const commentsWithOwnership = comments.map(comment => {
-      // Check if this comment belongs to the current user by comparing device fingerprint
-      // Since deviceId field is not in schema yet, use deviceFingerprint for now
+      // Check if this comment belongs to the current user
       const isYours = 
-        // Match based on fingerprint (which contains the user agent)
-        (deviceId && comment.deviceFingerprint === deviceId) ||
-        // Fall back to IP + deviceFingerprint check
-        (comment.ipAddress === ipAddress && 
-         userAgent && comment.deviceFingerprint === userAgent);
+        // First try to match by device ID
+        (deviceId && comment.deviceFingerprint?.includes(deviceId)) ||
+        // Fall back to IP address match if no device ID match
+        (!deviceId && comment.ipAddress === ipAddress);
       
       // Return the comment with an isYours flag, but don't expose the IP address
       return {
@@ -45,7 +42,7 @@ export async function GET(request: NextRequest) {
         content: comment.content,
         answer: comment.answer,
         createdAt: comment.createdAt,
-        isYours // Add this property to indicate if the comment is from the current user
+        isYours
       };
     });
     

@@ -51,12 +51,6 @@ export default function History() {
 
   useEffect(() => {
     fetchHistoricalPolls();
-    
-    // Refresh polls every 5 seconds to keep data fresh
-    const intervalId = setInterval(fetchHistoricalPolls, 5000);
-    
-    // Clean up on unmount
-    return () => clearInterval(intervalId);
   }, []);
 
   const formatDate = (dateString: string) => {

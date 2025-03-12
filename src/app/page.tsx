@@ -102,7 +102,7 @@ export default function Home() {
             try {
                 // Always fetch from API directly - no cache checking
                 const response = await fetch('/api/polls', {
-                    cache: 'no-store', // Ensure fresh data from the network
+                    cache: 'no-store',
                     headers: { 'Cache-Control': 'no-cache' }
                 });
 
@@ -137,10 +137,6 @@ export default function Home() {
         };
 
         fetchPoll();
-
-        // Refresh poll data more frequently - every 10 seconds
-        const intervalId = setInterval(fetchPoll, 10000);
-        return () => clearInterval(intervalId);
     }, []);
 
     // Fetch comments for the current poll
@@ -570,17 +566,9 @@ export default function Home() {
                                         <button
                                             onClick={() => {
                                                 if (userVote !== null || !hasCheckedVoteStatus) return;
-                                                
-                                                // Set the vote selection immediately
-                                                setSelectedVote(true);
-                                                
-                                                // If there's a comment, submit both vote and comment directly
+                                                submitVote(true);
                                                 if (comment.trim()) {
-                                                    // Submit vote with comment (all in one step)
-                                                    setTimeout(submitComment, 0);
-                                                } else {
-                                                    // No comment, just submit the vote
-                                                    submitVote(true);
+                                                    submitComment();
                                                 }
                                             }}
                                             disabled={voteSubmitting || userVote !== null || !hasCheckedVoteStatus}
@@ -596,17 +584,9 @@ export default function Home() {
                                         <button
                                             onClick={() => {
                                                 if (userVote !== null || !hasCheckedVoteStatus) return;
-                                                
-                                                // Set the vote selection immediately
-                                                setSelectedVote(false);
-                                                
-                                                // If there's a comment, submit both vote and comment directly
+                                                submitVote(false);
                                                 if (comment.trim()) {
-                                                    // Submit vote with comment (all in one step)
-                                                    setTimeout(submitComment, 0);
-                                                } else {
-                                                    // No comment, just submit the vote
-                                                    submitVote(false);
+                                                    submitComment();
                                                 }
                                             }}
                                             disabled={voteSubmitting || userVote !== null || !hasCheckedVoteStatus}
