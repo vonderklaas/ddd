@@ -6,6 +6,7 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const pollId = searchParams.get('pollId');
+    const deviceId = searchParams.get('deviceId'); // Get the device ID if provided
     
     if (!pollId) {
       return NextResponse.json({ message: 'Poll ID is required' }, { status: 400 });
@@ -14,12 +15,11 @@ export async function GET(request: NextRequest) {
     // Get the requester's IP and fingerprint
     const forwardedFor = request.headers.get('x-forwarded-for');
     const ipAddress = forwardedFor ? forwardedFor.split(',')[0].trim() : '127.0.0.1';
-    const deviceFingerprint = request.headers.get('user-agent') || '';
+    const userAgent = request.headers.get('user-agent') || '';
     
     const comments = await prisma.comment.findMany({
       where: {
         pollId,
-        // No hidden filter as it might not exist in the schema
       },
       orderBy: {
         createdAt: 'desc',
@@ -29,9 +29,14 @@ export async function GET(request: NextRequest) {
     
     // Mark comments from the current user
     const commentsWithOwnership = comments.map(comment => {
-      // Check if this comment belongs to the current user by IP or device fingerprint
-      const isYours = comment.ipAddress === ipAddress || 
-                     (deviceFingerprint && comment.deviceFingerprint === deviceFingerprint);
+      // Check if this comment belongs to the current user by comparing device fingerprint
+      // Since deviceId field is not in schema yet, use deviceFingerprint for now
+      const isYours = 
+        // Match based on fingerprint (which contains the user agent)
+        (deviceId && comment.deviceFingerprint === deviceId) ||
+        // Fall back to IP + deviceFingerprint check
+        (comment.ipAddress === ipAddress && 
+         userAgent && comment.deviceFingerprint === userAgent);
       
       // Return the comment with an isYours flag, but don't expose the IP address
       return {
@@ -54,7 +59,7 @@ export async function GET(request: NextRequest) {
 // POST /api/comments - Add a new comment
 export async function POST(request: NextRequest) {
   try {
-    const { pollId, content, answer, fingerprint } = await request.json();
+    const { pollId, content, answer, fingerprint, deviceId } = await request.json();
     
     if (!pollId || content === undefined || answer === undefined) {
       return NextResponse.json({ message: 'Poll ID, content, and answer are required' }, { status: 400 });
@@ -69,22 +74,40 @@ export async function POST(request: NextRequest) {
     const forwardedFor = request.headers.get('x-forwarded-for');
     const ipAddress = forwardedFor ? forwardedFor.split(',')[0].trim() : '127.0.0.1';
     
-    // Create device identifier
-    const deviceIdentifier = fingerprint || request.headers.get('user-agent') || '';
+    // Store deviceId in deviceFingerprint temporarily until schema is updated
+    // Combine it with the fingerprint to ensure uniqueness
+    const deviceFingerprint = deviceId ? `${deviceId}|${fingerprint || request.headers.get('user-agent') || ''}` : 
+                             (fingerprint || request.headers.get('user-agent') || '');
     
     // Check if user has already commented on this poll
-    const existingComment = await prisma.comment.findFirst({
-      where: {
-        pollId,
-        ipAddress,
-      },
-    });
+    let existingComment = null;
+    
+    // Try to find using device fingerprint that contains deviceId
+    if (deviceId) {
+      const deviceFingerValue = `${deviceId}|${request.headers.get('user-agent') || ''}`;
+      existingComment = await prisma.comment.findFirst({
+        where: {
+          pollId,
+          deviceFingerprint: deviceFingerValue,
+        },
+      });
+    }
+    
+    // If no match, fall back to IP address
+    if (!existingComment) {
+      existingComment = await prisma.comment.findFirst({
+        where: {
+          pollId,
+          ipAddress,
+        },
+      });
+    }
 
-    // Check if this device has already commented
-    const existingDeviceComment = !existingComment && deviceIdentifier ? await prisma.comment.findFirst({
+    // Also check by user agent/fingerprint
+    const existingDeviceComment = !existingComment && deviceFingerprint ? await prisma.comment.findFirst({
       where: {
         pollId,
-        deviceFingerprint: deviceIdentifier,
+        deviceFingerprint,
       },
     }) : null;
 
@@ -107,7 +130,7 @@ export async function POST(request: NextRequest) {
         content,
         answer: answer === true || answer === 'true',
         ipAddress,
-        deviceFingerprint: deviceIdentifier,
+        deviceFingerprint, // Store combined deviceId and fingerprint here
       },
     });
     

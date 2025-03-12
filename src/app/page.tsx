@@ -94,6 +94,29 @@ const getPollFromLocalStorage = (): { data: Poll | null, timestamp: number } => 
     return { data: null, timestamp: 0 };
 };
 
+// Generate a unique device ID for comment identification
+const getDeviceId = (): string => {
+    if (typeof window === 'undefined') return '';
+
+    try {
+        // Check if we already have a device ID stored
+        let deviceId = localStorage.getItem('globalPollDeviceId');
+        
+        // If not, create a new one
+        if (!deviceId) {
+            // Create a random ID using timestamp and random numbers
+            deviceId = `device_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+            localStorage.setItem('globalPollDeviceId', deviceId);
+        }
+        
+        return deviceId;
+    } catch (err) {
+        console.error('Error with device ID:', err);
+        // Fallback to a temporary random ID if localStorage fails
+        return `temp_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+    }
+};
+
 export default function Home() {
     const [poll, setPoll] = useState<Poll | null>(null);
     const [loading, setLoading] = useState(true);
@@ -212,7 +235,9 @@ export default function Home() {
         
         setLoadingComments(true);
         try {
-            const response = await fetch(`/api/comments?pollId=${pollId}`);
+            // Include the device ID when fetching comments
+            const deviceId = getDeviceId();
+            const response = await fetch(`/api/comments?pollId=${pollId}&deviceId=${encodeURIComponent(deviceId)}`);
             if (!response.ok) {
                 throw new Error('Failed to fetch comments');
             }
@@ -252,6 +277,7 @@ export default function Home() {
                     pollId: poll.id,
                     answer,
                     fingerprint: navigator.userAgent, // Simple fingerprint
+                    deviceId: getDeviceId(), // Add device ID
                 }),
             });
             
@@ -321,9 +347,9 @@ export default function Home() {
         }
     };
 
-    // Submit comment
+    // Submit comment along with vote
     const submitComment = async () => {
-        if (!poll || !comment.trim() || !selectedVote) return;
+        if (!poll || !comment.trim() || selectedVote === null) return;
 
         if (comment.length > 160) {
             setCommentError('Comment must be 160 characters or less');
@@ -355,6 +381,7 @@ export default function Home() {
                     pollId: poll.id,
                     answer: selectedVote,
                     fingerprint: navigator.userAgent,
+                    deviceId: getDeviceId(), // Add device ID
                 }),
             });
 
@@ -388,6 +415,7 @@ export default function Home() {
                     content: comment.trim(),
                     answer: selectedVote,
                     fingerprint: navigator.userAgent,
+                    deviceId: getDeviceId(), // Add device ID
                 }),
             });
 
@@ -477,7 +505,8 @@ export default function Home() {
     const checkVoteStatus = async (pollId: string) => {
         try {
             const fingerprint = navigator.userAgent;
-            const response = await fetch(`/api/votes/check?pollId=${pollId}&fingerprint=${encodeURIComponent(fingerprint)}`);
+            const deviceId = getDeviceId();
+            const response = await fetch(`/api/votes/check?pollId=${pollId}&fingerprint=${encodeURIComponent(fingerprint)}&deviceId=${encodeURIComponent(deviceId)}`);
             
             if (response.ok) {
                 const data = await response.json();
@@ -612,34 +641,18 @@ export default function Home() {
                                             {commentError && (
                                                 <p className="mt-1 text-xs text-red-500">{commentError}</p>
                                             )}
-
-                                            {selectedVote !== null && comment.trim() && (
-                                                <button
-                                                    id="submit-with-comment-btn"
-                                                    onClick={submitComment}
-                                                    disabled={voteSubmitting || !comment.trim() || userVote !== null || !hasCheckedVoteStatus}
-                                                    className="mt-2 bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded-md text-sm font-medium transition-colors disabled:opacity-50"
-                                                >
-                                                    {voteSubmitting ? 'Submitting...' : 'Submit Vote with Comment'}
-                                                </button>
-                                            )}
                                         </div>
                                     )}
 
                                     <div className="flex flex-col sm:flex-row justify-center gap-4 mb-8 relative">                                        
                                         <button
                                             onClick={() => {
-                                                if (userVote !== null || !hasCheckedVoteStatus) return; // Extra check to prevent voting if already voted or if status not checked
+                                                if (userVote !== null || !hasCheckedVoteStatus) return;
                                                 
+                                                // If there's a comment, submit both vote and comment directly
                                                 if (comment.trim()) {
-                                                    // If there's a comment, select YES and prepare for comment submission
                                                     setSelectedVote(true);
-                                                    // Only immediately submit if we haven't already shown the "Submit Vote with Comment" button
-                                                    if (!selectedVote) {
-                                                        setTimeout(() => {
-                                                            document.getElementById('submit-with-comment-btn')?.click();
-                                                        }, 0);
-                                                    }
+                                                    submitComment();
                                                 } else {
                                                     // No comment, just submit the vote
                                                     submitVote(true);
@@ -657,17 +670,12 @@ export default function Home() {
 
                                         <button
                                             onClick={() => {
-                                                if (userVote !== null || !hasCheckedVoteStatus) return; // Extra check to prevent voting if already voted or if status not checked
+                                                if (userVote !== null || !hasCheckedVoteStatus) return;
                                                 
+                                                // If there's a comment, submit both vote and comment directly
                                                 if (comment.trim()) {
-                                                    // If there's a comment, select NO and prepare for comment submission
                                                     setSelectedVote(false);
-                                                    // Only immediately submit if we haven't already shown the "Submit Vote with Comment" button
-                                                    if (!selectedVote) {
-                                                        setTimeout(() => {
-                                                            document.getElementById('submit-with-comment-btn')?.click();
-                                                        }, 0);
-                                                    }
+                                                    submitComment();
                                                 } else {
                                                     // No comment, just submit the vote
                                                     submitVote(false);
