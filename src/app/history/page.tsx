@@ -29,6 +29,7 @@ export default function History() {
     setLoading(true);
     
     try {
+      // Always fetch fresh data
       const response = await fetch('/api/polls/history', { 
         cache: 'no-store',
         headers: { 'Cache-Control': 'no-cache' }

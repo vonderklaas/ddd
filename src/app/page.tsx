@@ -29,16 +29,6 @@ interface Comment {
     isYours?: boolean;
 }
 
-// Cache storage with timestamps
-const pollCache = {
-    data: null as Poll | null,
-    timestamp: 0,
-    cacheDuration: 30000, // 30 seconds in milliseconds (increased from 10 seconds)
-    isValid: function () {
-        return this.data && (Date.now() - this.timestamp < this.cacheDuration);
-    }
-};
-
 // Helper functions for localStorage
 const getUserVoteFromStorage = (pollId: string): boolean | null => {
     if (typeof window === 'undefined') return null;
@@ -62,36 +52,6 @@ const saveUserVoteToStorage = (pollId: string, vote: boolean): void => {
     } catch (err) {
         console.error('Error saving to localStorage:', err);
     }
-};
-
-// Helper to store poll data in localStorage 
-const savePollToLocalStorage = (pollData: Poll): void => {
-    if (typeof window === 'undefined') return;
-
-    try {
-        localStorage.setItem('currentPollCache', JSON.stringify({
-            data: pollData,
-            timestamp: Date.now()
-        }));
-    } catch (err) {
-        console.error('Error saving poll to localStorage:', err);
-    }
-};
-
-// Helper to get poll data from localStorage
-const getPollFromLocalStorage = (): { data: Poll | null, timestamp: number } => {
-    if (typeof window === 'undefined') return { data: null, timestamp: 0 };
-
-    try {
-        const cachedData = localStorage.getItem('currentPollCache');
-        if (cachedData) {
-            return JSON.parse(cachedData);
-        }
-    } catch (err) {
-        console.error('Error reading poll from localStorage:', err);
-    }
-
-    return { data: null, timestamp: 0 };
 };
 
 // Generate a unique device ID for comment identification
@@ -134,55 +94,17 @@ export default function Home() {
     const [selectedVote, setSelectedVote] = useState<boolean | null>(null);
     const [hasCheckedVoteStatus, setHasCheckedVoteStatus] = useState(false);
 
-    // Fetch current poll with caching
+    // Fetch current poll without any caching
     useEffect(() => {
         const fetchPoll = async () => {
-            // Check if we have valid in-memory cached data
-            if (pollCache.isValid()) {
-                setPoll(pollCache.data);
-                
-                // Check localStorage for this poll's vote
-                if (pollCache.data) {
-                    const savedVote = getUserVoteFromStorage(pollCache.data.id);
-                    setUserVote(savedVote);
-                    
-                    // Also check server-side vote status - this ensures even if localStorage is cleared, UI still reflects vote status
-                    if (pollCache.data.id) {
-                        await checkVoteStatus(pollCache.data.id);
-                    }
-                }
-                
-                setLoading(false);
-                return;
-            }
-
-            // Check localStorage for cached poll data
-            const { data: cachedPoll, timestamp } = getPollFromLocalStorage();
-
-            // If localStorage cache is valid (less than 30 seconds old)
-            if (cachedPoll && (Date.now() - timestamp < 30000)) {
-                // Update in-memory cache
-                pollCache.data = cachedPoll;
-                pollCache.timestamp = timestamp;
-
-                setPoll(cachedPoll);
-
-                // Check localStorage for this poll's vote
-                const savedVote = getUserVoteFromStorage(cachedPoll.id);
-                setUserVote(savedVote);
-                
-                // Also check with the server
-                if (cachedPoll.id) {
-                    await checkVoteStatus(cachedPoll.id);
-                }
-
-                setLoading(false);
-                return;
-            }
-
-            // If no valid cache, fetch from API
+            setLoading(true);
+            
             try {
-                const response = await fetch('/api/polls');
+                // Always fetch from API directly - no cache checking
+                const response = await fetch('/api/polls', {
+                    cache: 'no-store', // Ensure fresh data from the network
+                    headers: { 'Cache-Control': 'no-cache' }
+                });
 
                 if (!response.ok) {
                     if (response.status === 404) {
@@ -196,19 +118,18 @@ export default function Home() {
 
                 const data = await response.json();
 
-                // Update the in-memory cache
-                pollCache.data = data;
-                pollCache.timestamp = Date.now();
-
-                // Update localStorage cache
-                savePollToLocalStorage(data);
-
                 // Check localStorage for this poll's vote
                 const savedVote = getUserVoteFromStorage(data.id);
                 setUserVote(savedVote);
 
+                // Also check server-side vote status
+                if (data.id) {
+                    await checkVoteStatus(data.id);
+                }
+
                 setPoll(data);
-            } catch {
+            } catch (err) {
+                console.error('Error fetching poll:', err);
                 setError('An error occurred. Please try again later.');
             } finally {
                 setLoading(false);
@@ -217,8 +138,8 @@ export default function Home() {
 
         fetchPoll();
 
-        // Refresh poll data every 60 seconds (increased from 30 seconds)
-        const intervalId = setInterval(fetchPoll, 60000);
+        // Refresh poll data more frequently - every 10 seconds
+        const intervalId = setInterval(fetchPoll, 10000);
         return () => clearInterval(intervalId);
     }, []);
 
@@ -242,7 +163,16 @@ export default function Home() {
                 throw new Error('Failed to fetch comments');
             }
             
-            const commentsData = await response.json();
+            let commentsData = await response.json();
+            
+            // Sort comments to pin user's own comments at the top
+            commentsData = commentsData.sort((a: Comment, b: Comment) => {
+                // First sort by isYours (true comes first)
+                if (a.isYours && !b.isYours) return -1;
+                if (!a.isYours && b.isYours) return 1;
+                // Then sort by timestamp (newest first)
+                return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+            });
             
             // Use the isYours property directly from the API
             setComments(commentsData);
@@ -314,17 +244,13 @@ export default function Home() {
             setComment('');
             
             // Fetch the actual updated poll data immediately
-            const pollResponse = await fetch('/api/polls');
+            const pollResponse = await fetch('/api/polls', {
+                cache: 'no-store',
+                headers: { 'Cache-Control': 'no-cache' }
+            });
             if (pollResponse.ok) {
                 const pollData = await pollResponse.json();
                 setPoll(pollData);
-                
-                // Update the in-memory cache
-                pollCache.data = pollData;
-                pollCache.timestamp = Date.now();
-                
-                // Update localStorage cache
-                savePollToLocalStorage(pollData);
                 
                 // End animation after a short delay
                 setTimeout(() => {
@@ -347,7 +273,7 @@ export default function Home() {
         }
     };
 
-    // Submit comment along with vote
+    // Submit comment along with vote - simplified to be called directly
     const submitComment = async () => {
         if (!poll || !comment.trim() || selectedVote === null) return;
 
@@ -440,19 +366,15 @@ export default function Home() {
             // Trigger animation
             setAnimatingResults(true);
 
-            // Fetch the actual updated poll data immediately
-            const pollResponse = await fetch('/api/polls');
+            // Update poll data with fresh data
+            const pollResponse = await fetch('/api/polls', {
+                cache: 'no-store',
+                headers: { 'Cache-Control': 'no-cache' }
+            });
             if (pollResponse.ok) {
                 const pollData = await pollResponse.json();
                 setPoll(pollData);
-
-                // Update the in-memory cache
-                pollCache.data = pollData;
-                pollCache.timestamp = Date.now();
-
-                // Update localStorage cache
-                savePollToLocalStorage(pollData);
-
+                
                 // End animation after a short delay
                 setTimeout(() => {
                     setAnimatingResults(false);
@@ -649,10 +571,13 @@ export default function Home() {
                                             onClick={() => {
                                                 if (userVote !== null || !hasCheckedVoteStatus) return;
                                                 
+                                                // Set the vote selection immediately
+                                                setSelectedVote(true);
+                                                
                                                 // If there's a comment, submit both vote and comment directly
                                                 if (comment.trim()) {
-                                                    setSelectedVote(true);
-                                                    submitComment();
+                                                    // Submit vote with comment (all in one step)
+                                                    setTimeout(submitComment, 0);
                                                 } else {
                                                     // No comment, just submit the vote
                                                     submitVote(true);
@@ -672,10 +597,13 @@ export default function Home() {
                                             onClick={() => {
                                                 if (userVote !== null || !hasCheckedVoteStatus) return;
                                                 
+                                                // Set the vote selection immediately
+                                                setSelectedVote(false);
+                                                
                                                 // If there's a comment, submit both vote and comment directly
                                                 if (comment.trim()) {
-                                                    setSelectedVote(false);
-                                                    submitComment();
+                                                    // Submit vote with comment (all in one step)
+                                                    setTimeout(submitComment, 0);
                                                 } else {
                                                     // No comment, just submit the vote
                                                     submitVote(false);
@@ -706,7 +634,7 @@ export default function Home() {
                                             {comments.map((comment) => (
                                                 <div 
                                                     key={comment.id} 
-                                                    className={`p-3 rounded-lg ${comment.isYours ? 'bg-blue-50 border border-blue-100' : 'bg-gray-50'}`}
+                                                    className={`p-3 rounded-lg ${comment.isYours ? 'bg-blue-50 border-2 border-blue-400' : 'bg-gray-50'}`}
                                                 >
                                                     <div className="flex items-start">
                                                         <span className={`inline-block px-2 py-1 text-xs font-semibold rounded-full mr-2 ${comment.answer ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
@@ -728,6 +656,44 @@ export default function Home() {
                                         </div>
                                     ) : (
                                         <p className="text-center text-sm text-gray-500">No comments yet.</p>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Also update the comments section that appears below when user hasn't voted */}
+                            {userVote === null && (
+                                <div className="mt-8 border-t pt-4">
+                                    <h3 className="text-lg font-semibold mb-4">Comments</h3>
+
+                                    {loadingComments ? (
+                                        <p className="text-center text-sm text-gray-500">Loading comments...</p>
+                                    ) : comments.length > 0 ? (
+                                        <div className="space-y-4">
+                                            {comments.map((comment) => (
+                                                <div 
+                                                    key={comment.id} 
+                                                    className={`p-3 rounded-lg ${comment.isYours ? 'bg-blue-50 border-2 border-blue-400' : 'bg-gray-50'}`}
+                                                >
+                                                    <div className="flex items-start">
+                                                        <span className={`inline-block px-2 py-1 text-xs font-semibold rounded-full mr-2 ${comment.answer ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                                                            }`}>
+                                                            {comment.answer ? 'YES' : 'NO'}
+                                                        </span>
+                                                        <p className="text-sm">
+                                                            {comment.content}
+                                                            {comment.isYours && (
+                                                                <span className="ml-2 text-blue-600 font-medium">(yours)</span>
+                                                            )}
+                                                        </p>
+                                                    </div>
+                                                    <p className="text-xs text-gray-500 mt-1">
+                                                        {new Date(comment.createdAt).toLocaleString()}
+                                                    </p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <p className="text-center text-sm text-gray-500">No comments yet. Be the first to comment!</p>
                                     )}
                                 </div>
                             )}
@@ -773,44 +739,6 @@ export default function Home() {
                                     </div>
                                 </div>
                             </div>
-
-                            {/* Comments section - only show at bottom if user hasn't voted yet */}
-                            {userVote === null && (
-                                <div className="mt-8 border-t pt-4">
-                                    <h3 className="text-lg font-semibold mb-4">Comments</h3>
-
-                                    {loadingComments ? (
-                                        <p className="text-center text-sm text-gray-500">Loading comments...</p>
-                                    ) : comments.length > 0 ? (
-                                        <div className="space-y-4">
-                                            {comments.map((comment) => (
-                                                <div 
-                                                    key={comment.id} 
-                                                    className={`p-3 rounded-lg ${comment.isYours ? 'bg-blue-50 border border-blue-100' : 'bg-gray-50'}`}
-                                                >
-                                                    <div className="flex items-start">
-                                                        <span className={`inline-block px-2 py-1 text-xs font-semibold rounded-full mr-2 ${comment.answer ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                                                            }`}>
-                                                            {comment.answer ? 'YES' : 'NO'}
-                                                        </span>
-                                                        <p className="text-sm">
-                                                            {comment.content}
-                                                            {comment.isYours && (
-                                                                <span className="ml-2 text-blue-600 font-medium">(yours)</span>
-                                                            )}
-                                                        </p>
-                                                    </div>
-                                                    <p className="text-xs text-gray-500 mt-1">
-                                                        {new Date(comment.createdAt).toLocaleString()}
-                                                    </p>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    ) : (
-                                        <p className="text-center text-sm text-gray-500">No comments yet. Be the first to comment!</p>
-                                    )}
-                                </div>
-                            )}
 
                             <div className="mt-6 text-center text-sm text-gray-500">
                                 <p>Total votes: {poll.statistics.totalVotes}</p>
