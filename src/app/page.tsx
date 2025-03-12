@@ -28,6 +28,31 @@ const pollCache = {
   }
 };
 
+// Helper functions for localStorage
+const getUserVoteFromStorage = (pollId: string): boolean | null => {
+  if (typeof window === 'undefined') return null;
+  
+  try {
+    const votes = JSON.parse(localStorage.getItem('globalPollVotes') || '{}');
+    return votes[pollId] !== undefined ? votes[pollId] : null;
+  } catch (err) {
+    console.error('Error reading from localStorage:', err);
+    return null;
+  }
+};
+
+const saveUserVoteToStorage = (pollId: string, vote: boolean): void => {
+  if (typeof window === 'undefined') return;
+  
+  try {
+    const votes = JSON.parse(localStorage.getItem('globalPollVotes') || '{}');
+    votes[pollId] = vote;
+    localStorage.setItem('globalPollVotes', JSON.stringify(votes));
+  } catch (err) {
+    console.error('Error saving to localStorage:', err);
+  }
+};
+
 export default function Home() {
   const [poll, setPoll] = useState<Poll | null>(null);
   const [loading, setLoading] = useState(true);
@@ -41,6 +66,13 @@ export default function Home() {
       // Check if we have valid cached data
       if (pollCache.isValid()) {
         setPoll(pollCache.data);
+        
+        // Check localStorage for this poll's vote
+        if (pollCache.data) {
+          const savedVote = getUserVoteFromStorage(pollCache.data.id);
+          setUserVote(savedVote);
+        }
+        
         setLoading(false);
         return;
       }
@@ -64,6 +96,10 @@ export default function Home() {
         pollCache.data = data;
         pollCache.timestamp = Date.now();
         
+        // Check localStorage for this poll's vote
+        const savedVote = getUserVoteFromStorage(data.id);
+        setUserVote(savedVote);
+        
         setPoll(data);
       } catch {
         setError('An error occurred. Please try again later.');
@@ -79,48 +115,18 @@ export default function Home() {
     return () => clearInterval(intervalId);
   }, []);
 
-  // Submit vote with optimistic updates
+  // Submit vote
   const submitVote = async (answer: boolean) => {
     if (!poll) return;
     
+    // If user has already voted with this answer, don't submit again
+    if (userVote === answer) return;
+    
     setVoteSubmitting(true);
-    setUserVote(answer);
+    setError(null);
     
-    // Create an optimistic copy of the poll with updated statistics
-    const originalPoll = { ...poll };
-    const optimisticPoll = { ...poll };
-    
-    // If the user already voted, adjust the previous vote count
-    if (userVote !== null) {
-      if (userVote === true) {
-        optimisticPoll.statistics.yesVotes -= 1;
-      } else {
-        optimisticPoll.statistics.noVotes -= 1;
-      }
-    }
-    
-    // Add the new vote
-    if (answer) {
-      optimisticPoll.statistics.yesVotes += 1;
-    } else {
-      optimisticPoll.statistics.noVotes += 1;
-    }
-    
-    // Recalculate percentages
-    const totalVotes = optimisticPoll.statistics.yesVotes + optimisticPoll.statistics.noVotes;
-    optimisticPoll.statistics.totalVotes = totalVotes;
-    optimisticPoll.statistics.yesPercentage = totalVotes > 0 
-      ? Math.round((optimisticPoll.statistics.yesVotes / totalVotes) * 100) 
-      : 0;
-    optimisticPoll.statistics.noPercentage = totalVotes > 0 
-      ? Math.round((optimisticPoll.statistics.noVotes / totalVotes) * 100) 
-      : 0;
-    
-    // Update UI immediately with optimistic result
-    setPoll(optimisticPoll);
-    
-    // Now make the actual API call
     try {
+      // Make the API call first
       const response = await fetch('/api/votes', {
         method: 'POST',
         headers: {
@@ -139,25 +145,27 @@ export default function Home() {
       
       await response.json();
       
-      // Fetch the actual updated poll data (but not immediately to avoid UI flicker)
-      setTimeout(async () => {
-        const pollResponse = await fetch('/api/polls');
-        if (pollResponse.ok) {
-          const pollData = await pollResponse.json();
-          setPoll(pollData);
-          
-          // Update the cache
-          pollCache.data = pollData;
-          pollCache.timestamp = Date.now();
-        }
-      }, 2000);
+      // Update user's vote state
+      setUserVote(answer);
+      
+      // Save vote to localStorage
+      saveUserVoteToStorage(poll.id, answer);
+      
+      // Fetch the actual updated poll data immediately
+      const pollResponse = await fetch('/api/polls');
+      if (pollResponse.ok) {
+        const pollData = await pollResponse.json();
+        setPoll(pollData);
+        
+        // Update the cache
+        pollCache.data = pollData;
+        pollCache.timestamp = Date.now();
+      } else {
+        throw new Error('Failed to fetch updated poll data');
+      }
     } catch (err) {
       console.error('Error submitting vote:', err);
       setError('Failed to submit your vote. Please try again.');
-      
-      // Revert to original poll data
-      setPoll(originalPoll);
-      setUserVote(userVote);
     } finally {
       setVoteSubmitting(false);
     }
@@ -218,28 +226,49 @@ export default function Home() {
               <div className="flex flex-col sm:flex-row justify-center gap-4 mb-8">
                 <button
                   onClick={() => submitVote(true)}
-                  disabled={voteSubmitting}
+                  disabled={voteSubmitting || userVote === true}
                   className={`py-3 px-8 rounded-full font-bold text-white ${
                     userVote === true
-                      ? 'bg-green-600'
+                      ? 'bg-green-600 cursor-not-allowed'
                       : 'bg-green-500 hover:bg-green-600'
                   } transition-all duration-200 shadow-md hover:shadow-lg disabled:opacity-50`}
                 >
-                  YES
+                  {voteSubmitting ? 'Submitting...' : userVote === true ? 'Voted YES' : 'YES'}
                 </button>
                 
                 <button
                   onClick={() => submitVote(false)}
-                  disabled={voteSubmitting}
+                  disabled={voteSubmitting || userVote === false}
                   className={`py-3 px-8 rounded-full font-bold text-white ${
                     userVote === false
-                      ? 'bg-red-600'
+                      ? 'bg-red-600 cursor-not-allowed'
                       : 'bg-red-500 hover:bg-red-600'
                   } transition-all duration-200 shadow-md hover:shadow-lg disabled:opacity-50`}
                 >
-                  NO
+                  {voteSubmitting ? 'Submitting...' : userVote === false ? 'Voted NO' : 'NO'}
                 </button>
               </div>
+              
+              {userVote !== null && (
+                <div className="text-center text-sm text-green-600 mb-4">
+                  You have voted {userVote ? 'YES' : 'NO'} on this poll.
+                  {userVote !== null && (
+                    <button 
+                      className="ml-2 text-blue-500 hover:underline"
+                      onClick={() => {
+                        setUserVote(null);
+                        if (poll) {
+                          const votes = JSON.parse(localStorage.getItem('globalPollVotes') || '{}');
+                          delete votes[poll.id];
+                          localStorage.setItem('globalPollVotes', JSON.stringify(votes));
+                        }
+                      }}
+                    >
+                      Change vote
+                    </button>
+                  )}
+                </div>
+              )}
               
               <div className="mb-4">
                 <h3 className="text-sm text-gray-500 mb-2 text-center">Current Results</h3>
