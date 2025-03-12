@@ -20,60 +20,19 @@ interface Poll {
   };
 }
 
-// Cache storage with timestamps
-const historyCache = {
-  data: null as Poll[] | null,
-  timestamp: 0,
-  cacheDuration: 60000, // 1 minute in milliseconds (reduced from 1 hour)
-  isValid: function() {
-    return this.data && (Date.now() - this.timestamp < this.cacheDuration);
-  }
-};
-
 export default function History() {
   const [polls, setPolls] = useState<Poll[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
 
-  const fetchHistoricalPolls = async (bypassCache = false) => {
-    if (bypassCache) {
-      setRefreshing(true);
-      setLoading(true);
-    }
+  const fetchHistoricalPolls = async () => {
+    setLoading(true);
     
-    // If explicitly bypassing cache, skip these checks
-    if (!bypassCache) {
-      // First check in-memory cache
-      if (historyCache.isValid()) {
-        setPolls(historyCache.data || []);
-        setLoading(false);
-        return;
-      }
-      
-      // Then check localStorage cache
-      try {
-        const cachedHistory = localStorage.getItem('pollHistoryCache');
-        if (cachedHistory && !bypassCache) {
-          const { data, timestamp } = JSON.parse(cachedHistory);
-          // Check if cache is still valid (within 1 minute)
-          if (data && Date.now() - timestamp < 60000) {
-            setPolls(data);
-            setLoading(false);
-            // Also update in-memory cache
-            historyCache.data = data;
-            historyCache.timestamp = timestamp;
-            return;
-          }
-        }
-      } catch (err) {
-        console.error('Error reading from localStorage:', err);
-      }
-    }
-    
-    // If no valid cache exists or bypassing cache, fetch from API
     try {
-      const response = await fetch('/api/polls/history');
+      const response = await fetch('/api/polls/history', { 
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache' }
+      });
       
       if (!response.ok) {
         throw new Error('Failed to fetch historical polls');
@@ -81,47 +40,22 @@ export default function History() {
       
       const data = await response.json();
       setPolls(data);
-      
-      // Update in-memory cache
-      historyCache.data = data;
-      historyCache.timestamp = Date.now();
-      
-      // Update localStorage cache
-      try {
-        localStorage.setItem('pollHistoryCache', JSON.stringify({
-          data,
-          timestamp: Date.now()
-        }));
-      } catch (err) {
-        console.error('Error saving to localStorage:', err);
-      }
-    } catch {
+    } catch (err) {
+      console.error('Error fetching polls:', err);
       setError('Failed to load historical polls. Please try again later.');
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
-  };
-
-  // Clear cache and refresh data
-  const refreshData = () => {
-    // Clear in-memory cache
-    historyCache.data = null;
-    historyCache.timestamp = 0;
-    
-    // Clear localStorage cache
-    try {
-      localStorage.removeItem('pollHistoryCache');
-    } catch (err) {
-      console.error('Error clearing localStorage:', err);
-    }
-    
-    // Fetch fresh data
-    fetchHistoricalPolls(true);
   };
 
   useEffect(() => {
     fetchHistoricalPolls();
+    
+    // Refresh polls every 5 seconds to keep data fresh
+    const intervalId = setInterval(fetchHistoricalPolls, 5000);
+    
+    // Clean up on unmount
+    return () => clearInterval(intervalId);
   }, []);
 
   const formatDate = (dateString: string) => {
@@ -137,6 +71,13 @@ export default function History() {
           <Link href="/" className="text-blue-500 hover:underline text-sm">
             Back to Current Poll
           </Link>
+          {' • '}
+          <button 
+            onClick={fetchHistoricalPolls}
+            className="text-blue-500 hover:underline text-sm"
+          >
+            Refresh
+          </button>
         </div>
         
         {loading && <p className="text-center">Loading historical polls...</p>}
@@ -144,7 +85,10 @@ export default function History() {
         {error && <p className="text-center text-red-500">{error}</p>}
         
         {!loading && !error && polls.length === 0 && (
-          <p className="text-center">No historical polls available yet.</p>
+          <div className="text-center">
+            <p className="mb-4">No historical polls available yet.</p>
+            <p className="text-sm text-gray-500">Note: Only archived polls appear here. Active polls are not shown in history.</p>
+          </div>
         )}
         
         {polls.length > 0 && (

@@ -26,6 +26,7 @@ interface Comment {
     content: string;
     answer: boolean;
     createdAt: string;
+    isYours?: boolean;
 }
 
 // Cache storage with timestamps
@@ -205,19 +206,23 @@ export default function Home() {
         }
     }, [poll]);
 
-    // Fetch comments
+    // Function to fetch comments for the current poll
     const fetchComments = async (pollId: string) => {
+        if (!pollId) return;
+        
         setLoadingComments(true);
         try {
             const response = await fetch(`/api/comments?pollId=${pollId}`);
-            if (response.ok) {
-                const data = await response.json();
-                setComments(data);
-            } else {
-                console.error('Failed to fetch comments');
+            if (!response.ok) {
+                throw new Error('Failed to fetch comments');
             }
-        } catch (err) {
-            console.error('Error fetching comments:', err);
+            
+            const commentsData = await response.json();
+            
+            // Use the isYours property directly from the API
+            setComments(commentsData);
+        } catch (error) {
+            console.error('Error fetching comments:', error);
         } finally {
             setLoadingComments(false);
         }
@@ -468,7 +473,7 @@ export default function Home() {
         }
     };
 
-    // Add a new function to check vote status from server
+    // Check vote status from server
     const checkVoteStatus = async (pollId: string) => {
         try {
             const fingerprint = navigator.userAgent;
@@ -484,6 +489,9 @@ export default function Home() {
                     // Make sure the UI reflects the vote status
                     setSelectedVote(null);
                     setHasCheckedVoteStatus(true);
+                    
+                    // Also fetch comments to check if user has commented
+                    fetchComments(pollId);
                     return true;
                 } else {
                     setHasCheckedVoteStatus(true);
@@ -568,8 +576,12 @@ export default function Home() {
                                 </div>
                             )}
 
-                            {/* Voting section - ONLY shown if user hasn't voted yet AND vote status has been checked */}
-                            {hasCheckedVoteStatus && userVote === null ? (
+                            {/* User has already voted - show confirmation message instead of voting UI */}
+                            {hasCheckedVoteStatus && userVote !== null ? (
+                                <div className="text-center text-green-600 font-semibold mb-8 py-4 bg-green-50 rounded-lg border border-green-200">
+                                    You have voted {userVote ? 'YES' : 'NO'} on this poll.
+                                </div>
+                            ) : hasCheckedVoteStatus ? (
                                 <>
                                     {/* Comment form for users who haven't commented yet - ONLY SHOW IF USER HASN'T VOTED */}
                                     {!hasCommented && (
@@ -672,12 +684,45 @@ export default function Home() {
                                         </button>
                                     </div>
                                 </>
-                            ) : hasCheckedVoteStatus && userVote !== null ? (
-                                // User has already voted - show confirmation message instead of voting UI
-                                <div className="text-center text-green-600 font-semibold mb-8 py-4 bg-green-50 rounded-lg border border-green-200">
-                                    You have voted {userVote ? 'YES' : 'NO'} on this poll.
-                                </div>
                             ) : null /* Don't render anything while checking status */}
+
+                            {/* Comments section - move it above results when user has voted */}
+                            {userVote !== null && (
+                                <div className="mb-6 border-t pt-4">
+                                    <h3 className="text-lg font-semibold mb-4">Comments</h3>
+
+                                    {loadingComments ? (
+                                        <p className="text-center text-sm text-gray-500">Loading comments...</p>
+                                    ) : comments.length > 0 ? (
+                                        <div className="space-y-4">
+                                            {comments.map((comment) => (
+                                                <div 
+                                                    key={comment.id} 
+                                                    className={`p-3 rounded-lg ${comment.isYours ? 'bg-blue-50 border border-blue-100' : 'bg-gray-50'}`}
+                                                >
+                                                    <div className="flex items-start">
+                                                        <span className={`inline-block px-2 py-1 text-xs font-semibold rounded-full mr-2 ${comment.answer ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                                                            }`}>
+                                                            {comment.answer ? 'YES' : 'NO'}
+                                                        </span>
+                                                        <p className="text-sm">
+                                                            {comment.content}
+                                                            {comment.isYours && (
+                                                                <span className="ml-2 text-blue-600 font-medium">(yours)</span>
+                                                            )}
+                                                        </p>
+                                                    </div>
+                                                    <p className="text-xs text-gray-500 mt-1">
+                                                        {new Date(comment.createdAt).toLocaleString()}
+                                                    </p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <p className="text-center text-sm text-gray-500">No comments yet.</p>
+                                    )}
+                                </div>
+                            )}
 
                             <div className="mb-4">
                                 <h3 className="text-sm text-gray-500 mb-2 text-center">Current Results</h3>
@@ -721,33 +766,43 @@ export default function Home() {
                                 </div>
                             </div>
 
-                            {/* Comments section */}
-                            <div className="mt-8 border-t pt-4">
-                                <h3 className="text-lg font-semibold mb-4">Comments</h3>
+                            {/* Comments section - only show at bottom if user hasn't voted yet */}
+                            {userVote === null && (
+                                <div className="mt-8 border-t pt-4">
+                                    <h3 className="text-lg font-semibold mb-4">Comments</h3>
 
-                                {loadingComments ? (
-                                    <p className="text-center text-sm text-gray-500">Loading comments...</p>
-                                ) : comments.length > 0 ? (
-                                    <div className="space-y-4">
-                                        {comments.map((comment) => (
-                                            <div key={comment.id} className="p-3 bg-gray-50 rounded-lg">
-                                                <div className="flex items-start">
-                                                    <span className={`inline-block px-2 py-1 text-xs font-semibold rounded-full mr-2 ${comment.answer ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                                                        }`}>
-                                                        {comment.answer ? 'YES' : 'NO'}
-                                                    </span>
-                                                    <p className="text-sm">{comment.content}</p>
+                                    {loadingComments ? (
+                                        <p className="text-center text-sm text-gray-500">Loading comments...</p>
+                                    ) : comments.length > 0 ? (
+                                        <div className="space-y-4">
+                                            {comments.map((comment) => (
+                                                <div 
+                                                    key={comment.id} 
+                                                    className={`p-3 rounded-lg ${comment.isYours ? 'bg-blue-50 border border-blue-100' : 'bg-gray-50'}`}
+                                                >
+                                                    <div className="flex items-start">
+                                                        <span className={`inline-block px-2 py-1 text-xs font-semibold rounded-full mr-2 ${comment.answer ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                                                            }`}>
+                                                            {comment.answer ? 'YES' : 'NO'}
+                                                        </span>
+                                                        <p className="text-sm">
+                                                            {comment.content}
+                                                            {comment.isYours && (
+                                                                <span className="ml-2 text-blue-600 font-medium">(yours)</span>
+                                                            )}
+                                                        </p>
+                                                    </div>
+                                                    <p className="text-xs text-gray-500 mt-1">
+                                                        {new Date(comment.createdAt).toLocaleString()}
+                                                    </p>
                                                 </div>
-                                                <p className="text-xs text-gray-500 mt-1">
-                                                    {new Date(comment.createdAt).toLocaleString()}
-                                                </p>
-                                            </div>
-                                        ))}
-                                    </div>
-                                ) : (
-                                    <p className="text-center text-sm text-gray-500">No comments yet. Be the first to comment!</p>
-                                )}
-                            </div>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <p className="text-center text-sm text-gray-500">No comments yet. Be the first to comment!</p>
+                                    )}
+                                </div>
+                            )}
 
                             <div className="mt-6 text-center text-sm text-gray-500">
                                 <p>Total votes: {poll.statistics.totalVotes}</p>

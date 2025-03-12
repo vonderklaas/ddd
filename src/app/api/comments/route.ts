@@ -11,9 +11,15 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ message: 'Poll ID is required' }, { status: 400 });
     }
     
+    // Get the requester's IP and fingerprint
+    const forwardedFor = request.headers.get('x-forwarded-for');
+    const ipAddress = forwardedFor ? forwardedFor.split(',')[0].trim() : '127.0.0.1';
+    const deviceFingerprint = request.headers.get('user-agent') || '';
+    
     const comments = await prisma.comment.findMany({
       where: {
         pollId,
+        // No hidden filter as it might not exist in the schema
       },
       orderBy: {
         createdAt: 'desc',
@@ -21,7 +27,24 @@ export async function GET(request: NextRequest) {
       take: 50, // Limit to 50 most recent comments
     });
     
-    return NextResponse.json(comments);
+    // Mark comments from the current user
+    const commentsWithOwnership = comments.map(comment => {
+      // Check if this comment belongs to the current user by IP or device fingerprint
+      const isYours = comment.ipAddress === ipAddress || 
+                     (deviceFingerprint && comment.deviceFingerprint === deviceFingerprint);
+      
+      // Return the comment with an isYours flag, but don't expose the IP address
+      return {
+        id: comment.id,
+        pollId: comment.pollId,
+        content: comment.content,
+        answer: comment.answer,
+        createdAt: comment.createdAt,
+        isYours // Add this property to indicate if the comment is from the current user
+      };
+    });
+    
+    return NextResponse.json(commentsWithOwnership);
   } catch (error) {
     console.error('Error fetching comments:', error);
     return NextResponse.json({ message: 'Failed to fetch comments' }, { status: 500 });
